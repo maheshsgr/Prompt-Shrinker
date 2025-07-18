@@ -1,0 +1,27 @@
+2024-01-18 14:23:15.123 [ERROR] Failed to connect to database
+2024-01-18 14:23:15.124 [ERROR] Connection timeout after 30 seconds
+Error: ECONNREFUSED: Connection refused
+    at TCPConnectWrap.afterConnect [as oncomplete] (net.js:1141:16)
+    at connectToDatabase (/app/src/database/connection.js:45:12)
+    at DatabaseManager.initialize (/app/src/database/manager.js:23:8)
+    at Object.<anonymous> (/app/src/server.js:15:3)
+    at Module._compile (internal/modules/cjs/loader.js:999:30)
+    at Object.Module._extensions..js (internal/modules/cjs/loader.js:1027:10)
+    at Module.load (internal/modules/cjs/loader.js:863:32)
+    at Function.Module._load (internal/modules/cjs/loader.js:708:14)
+    at Function.executeUserEntryPoint [as runMain] (internal/process/execution.js:4)
+    at internal/main/run_main_module.js:17:47
+2024-01-18 14:23:15.125 [INFO] Attempting to reconnect in 5 seconds...
+2024-01-18 14:23:20.130 [ERROR] Retry attempt 1 failed
+2024-01-18 14:23:20.131 [ERROR] ECONNREFUSED: Connection refused
+    at TCPConnectWrap.afterConnect [as oncomplete] (net.js:1141:16)
+    at connectToDatabase (/app/src/database/connection.js:45:12)
+    at DatabaseManager.retry (/app/src/database/manager.js:67:5)
+    at Timeout._onTimeout (/app/src/database/manager.js:78:10)
+    at listOnTimeout (internal/timers.js:549:17)
+    at processTimers (internal/timers.js:492:7)
+2024-01-18 14:23:20.132 [DEBUG] Database connection pool status: 0/10 active connections
+2024-01-18 14:23:20.133 [DEBUG] Memory usage: RSS 45.2MB, Heap Used 23.1MB
+2024-01-18 14:23:25.140 [ERROR] Retry attempt 2 failed
+2024-01-18 14:23:25.141 [FATAL] Maximum retry attempts reached, shutting down application
+2024-01-18 14:23:25.142 [INFO] Gracefully shutting down server...
