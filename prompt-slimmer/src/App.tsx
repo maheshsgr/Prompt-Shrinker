@@ -2,12 +2,16 @@ import React, { useState, useCallback } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import { Button } from "./components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./components/ui/dialog";
+import { Badge } from "./components/ui/badge";
 import { CodeEditor } from "./components/CodeEditor";
 import { ModelDownloader } from "./components/ModelDownloader";
 import { ModeSelector, ProcessingMode } from "./components/ModeSelector";
 import { CompressionSlider, CompressionLevel } from "./components/CompressionSlider";
+import { SchemaViewer } from "./components/SchemaViewer";
 import { slimJson, JsonSlimOptions, SlimResult } from "./utils/jsonSlimmer";
 import { slimLogs, LogSlimOptions } from "./utils/logSlimmer";
+import { analyzeJson, AnalysisResult } from "./utils/jsonAnalyzer";
 import { formatContent } from "./utils/languageDetector";
 import { 
   Scissors, 
@@ -19,22 +23,27 @@ import {
   BarChart3,
   Sparkles,
   Upload,
-  RefreshCw
+  RefreshCw,
+  Settings,
+  Microscope
 } from "lucide-react";
 import "./App.css";
 
 function App() {
-  const [mode, setMode] = useState<ProcessingMode>('json');
+  const [mode, setMode] = useState<ProcessingMode>('schema');
   const [compressionLevel, setCompressionLevel] = useState<CompressionLevel>('medium');
   const [input, setInput] = useState('');
   const [result, setResult] = useState<SlimResult | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const processInput = useCallback(async () => {
     if (!input.trim()) {
       setResult(null);
+      setAnalysisResult(null);
       return;
     }
 
@@ -42,28 +51,33 @@ function App() {
     setError(null);
 
     try {
-      let processedResult: SlimResult;
-
-      if (mode === 'json') {
+      if (mode === 'schema') {
+        const analysis = analyzeJson(input);
+        setAnalysisResult(analysis);
+        setResult(null);
+      } else if (mode === 'json') {
         const options: JsonSlimOptions = {
           compressionLevel,
           maxArraySamples: compressionLevel === 'low' ? 5 : compressionLevel === 'medium' ? 3 : 2,
           preserveKeys: ['id', 'name', 'type', 'status', 'error', 'message']
         };
-        processedResult = slimJson(input, options);
+        const processedResult = slimJson(input, options);
+        setResult(processedResult);
+        setAnalysisResult(null);
       } else {
         const options: LogSlimOptions = {
           compressionLevel,
           preservePatterns: ['error', 'exception', 'failed', 'warning'],
           maxStackDepth: compressionLevel === 'low' ? 10 : compressionLevel === 'medium' ? 6 : 3
         };
-        processedResult = slimLogs(input, options);
+        const processedResult = slimLogs(input, options);
+        setResult(processedResult);
+        setAnalysisResult(null);
       }
-
-      setResult(processedResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Processing failed');
       setResult(null);
+      setAnalysisResult(null);
     } finally {
       setIsProcessing(false);
     }
@@ -90,32 +104,40 @@ function App() {
     }
   };
 
-  const handleCopy = async () => {
-    if (result?.slimmed) {
-      try {
-        await navigator.clipboard.writeText(result.slimmed);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      } catch (err) {
-        console.error('Failed to copy:', err);
-      }
+  const handleCopy = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
     }
   };
 
   const formatOutput = () => {
+    if (mode === 'schema') {
+      return analysisResult?.summary || '';
+    }
     if (!result?.slimmed) return '';
     return formatContent(result.slimmed, mode === 'json' ? 'json' : 'plaintext');
   };
 
+  const getOutputContent = () => {
+    if (mode === 'schema') {
+      return analysisResult?.summary || '';
+    }
+    return result?.slimmed || '';
+  };
+
   const getPlaceholder = () => {
-    if (mode === 'json') {
+    if (mode === 'json' || mode === 'schema') {
       return `Paste your JSON payload here...
 
 Example:
 {
   "users": [
-    {"id": 1, "name": "John", "email": "john@example.com"},
-    {"id": 2, "name": "Jane", "email": "jane@example.com"}
+    {"id": 1, "name": "John", "email": "john@example.com", "active": true},
+    {"id": 2, "name": "Jane", "email": "jane@example.com", "active": false}
   ],
   "metadata": {
     "total": 2,
@@ -135,6 +157,26 @@ Error: Something went wrong
 2024-01-01 10:30:45 ERROR: Database connection failed
 2024-01-01 10:30:46 INFO: Retrying connection...`;
   };
+
+  const getCurrentStats = () => {
+    if (mode === 'schema' && analysisResult) {
+      return {
+        originalTokens: analysisResult.originalTokens,
+        processedTokens: analysisResult.schemaTokens,
+        compressionRatio: analysisResult.compressionRatio
+      };
+    }
+    if (result) {
+      return {
+        originalTokens: result.originalTokens,
+        processedTokens: result.slimmedTokens,
+        compressionRatio: result.compressionRatio
+      };
+    }
+    return null;
+  };
+
+  const stats = getCurrentStats();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
@@ -156,7 +198,39 @@ Error: Something went wrong
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <Dialog open={showSettings} onOpenChange={setShowSettings}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Settings className="h-4 w-4 mr-2" />
+                    Settings
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Processing Settings</DialogTitle>
+                    <DialogDescription>
+                      Configure how your data is processed
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div>
+                      <h4 className="font-medium mb-2">Processing Mode</h4>
+                      <ModeSelector value={mode} onChange={setMode} />
+                    </div>
+                    {mode !== 'schema' && (
+                      <div>
+                        <h4 className="font-medium mb-2">Compression Level</h4>
+                        <CompressionSlider 
+                          value={compressionLevel} 
+                          onChange={setCompressionLevel} 
+                        />
+                      </div>
+                    )}
+                  </div>
+                </DialogContent>
+              </Dialog>
+
               <div className="flex items-center gap-2 px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400 rounded-full text-sm">
                 <Shield className="h-4 w-4" />
                 <span className="font-medium">100% Offline</span>
@@ -185,32 +259,43 @@ Error: Something went wrong
           </TabsList>
 
           <TabsContent value="editor" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-              {/* Controls Sidebar */}
-              <div className="space-y-4">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg">Processing Mode</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ModeSelector value={mode} onChange={setMode} />
-                  </CardContent>
-                </Card>
-                
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-lg">Compression Level</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <CompressionSlider 
-                      value={compressionLevel} 
-                      onChange={setCompressionLevel} 
-                    />
-                  </CardContent>
-                </Card>
+            {/* Current Mode Banner */}
+            <Card className="border-l-4 border-l-primary">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {mode === 'schema' ? (
+                      <Microscope className="h-5 w-5 text-primary" />
+                    ) : mode === 'json' ? (
+                      <FileText className="h-5 w-5 text-primary" />
+                    ) : (
+                      <Zap className="h-5 w-5 text-primary" />
+                    )}
+                    <div>
+                      <h3 className="font-medium">
+                        {mode === 'schema' ? 'Schema Analysis Mode' : 
+                         mode === 'json' ? 'JSON Slimming Mode' : 'Log Simplification Mode'}
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        {mode === 'schema' ? 'Analyzing data types, ranges, and creating generalized schemas' :
+                         mode === 'json' ? 'Compressing JSON by removing duplicate structures' :
+                         'Extracting key information from error logs'}
+                      </p>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>
+                    <Settings className="h-4 w-4 mr-2" />
+                    Change Mode
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
 
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              {/* Sidebar */}
+              <div className="space-y-4">
                 {/* Processing Stats */}
-                {result && (
+                {stats && (
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-lg flex items-center gap-2">
@@ -222,16 +307,18 @@ Error: Something went wrong
                       <div className="space-y-2">
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground">Original:</span>
-                          <span className="font-medium">{result.originalTokens.toLocaleString()} tokens</span>
+                          <span className="font-medium">{stats.originalTokens.toLocaleString()} tokens</span>
                         </div>
                         <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Optimized:</span>
-                          <span className="font-medium text-green-600">{result.slimmedTokens.toLocaleString()} tokens</span>
+                          <span className="text-muted-foreground">
+                            {mode === 'schema' ? 'Schema:' : 'Optimized:'}
+                          </span>
+                          <span className="font-medium text-green-600">{stats.processedTokens.toLocaleString()} tokens</span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground">Reduction:</span>
                           <span className="font-bold text-green-600">
-                            {(result.compressionRatio * 100).toFixed(1)}%
+                            {(stats.compressionRatio * 100).toFixed(1)}%
                           </span>
                         </div>
                       </div>
@@ -240,11 +327,11 @@ Error: Something went wrong
                         <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                           <div 
                             className="bg-gradient-to-r from-green-500 to-blue-500 h-2 rounded-full transition-all duration-500"
-                            style={{ width: `${result.compressionRatio * 100}%` }}
+                            style={{ width: `${stats.compressionRatio * 100}%` }}
                           />
                         </div>
                         <p className="text-xs text-muted-foreground mt-1 text-center">
-                          Saved {(result.originalTokens - result.slimmedTokens).toLocaleString()} tokens
+                          Saved {(stats.originalTokens - stats.processedTokens).toLocaleString()} tokens
                         </p>
                       </div>
                     </CardContent>
@@ -286,7 +373,7 @@ Error: Something went wrong
                 </Card>
               </div>
 
-              {/* Editor Area */}
+              {/* Main Editor Area */}
               <div className="lg:col-span-3 space-y-6">
                 {/* Error Display */}
                 {error && (
@@ -314,7 +401,7 @@ Error: Something went wrong
                       </span>
                     </CardTitle>
                     <CardDescription>
-                      Paste your {mode === 'json' ? 'JSON data' : 'error logs'} here or upload a file
+                      Paste your {mode === 'json' || mode === 'schema' ? 'JSON data' : 'error logs'} here or upload a file
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -322,59 +409,110 @@ Error: Something went wrong
                       value={input}
                       onChange={setInput}
                       placeholder={getPlaceholder()}
-                      height="500px"
+                      height="400px"
                       theme="vs-dark"
                     />
                   </CardContent>
                 </Card>
 
-                {/* Output Editor */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <span className="flex items-center gap-2">
-                        <Zap className="h-5 w-5 text-green-600" />
-                        Optimized Output
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {result && (
-                          <span className="text-sm font-normal text-muted-foreground">
-                            {result.slimmedTokens.toLocaleString()} tokens
-                          </span>
-                        )}
-                        <Button
-                          size="sm"
-                          onClick={handleCopy}
-                          disabled={!result?.slimmed}
-                          className="h-8"
-                        >
-                          <Copy className="h-4 w-4 mr-1" />
-                          {copied ? 'Copied!' : 'Copy'}
-                        </Button>
-                      </div>
-                    </CardTitle>
-                    <CardDescription>
-                      Processed and optimized content with reduced token count
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <CodeEditor
-                      value={formatOutput()}
-                      readOnly
-                      height="500px"
-                      theme="vs-dark"
-                      placeholder={isProcessing ? 'Processing your input...' : 'Optimized content will appear here'}
-                    />
-                    {isProcessing && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm rounded-lg">
-                        <div className="flex items-center gap-3 text-center">
-                          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                          <span className="text-sm font-medium">Processing your {mode}...</span>
+                {/* Schema Analysis View */}
+                {mode === 'schema' && analysisResult && (
+                  <SchemaViewer 
+                    schema={analysisResult.schema} 
+                    title="Data Schema Analysis"
+                  />
+                )}
+
+                {/* Output Editor (for non-schema modes) */}
+                {mode !== 'schema' && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <span className="flex items-center gap-2">
+                          <Zap className="h-5 w-5 text-green-600" />
+                          Optimized Output
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {result && (
+                            <span className="text-sm font-normal text-muted-foreground">
+                              {result.slimmedTokens.toLocaleString()} tokens
+                            </span>
+                          )}
+                          <Button
+                            size="sm"
+                            onClick={() => handleCopy(getOutputContent())}
+                            disabled={!getOutputContent()}
+                            className="h-8"
+                          >
+                            <Copy className="h-4 w-4 mr-1" />
+                            {copied ? 'Copied!' : 'Copy'}
+                          </Button>
                         </div>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                      </CardTitle>
+                      <CardDescription>
+                        Processed and optimized content with reduced token count
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <CodeEditor
+                        value={formatOutput()}
+                        readOnly
+                        height="400px"
+                        theme="vs-dark"
+                        placeholder={isProcessing ? 'Processing your input...' : 'Optimized content will appear here'}
+                      />
+                      {isProcessing && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm rounded-lg">
+                          <div className="flex items-center gap-3 text-center">
+                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                            <span className="text-sm font-medium">Processing your {mode}...</span>
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Summary Output for Schema Mode */}
+                {mode === 'schema' && analysisResult && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center justify-between">
+                        <span className="flex items-center gap-2">
+                          <FileText className="h-5 w-5 text-blue-600" />
+                          Summary for AI Prompts
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-normal text-muted-foreground">
+                            {analysisResult.schemaTokens.toLocaleString()} tokens
+                          </span>
+                          <Button
+                            size="sm"
+                            onClick={() => handleCopy(analysisResult.summary)}
+                            disabled={!analysisResult.summary}
+                            className="h-8"
+                          >
+                            <Copy className="h-4 w-4 mr-1" />
+                            {copied ? 'Copied!' : 'Copy'}
+                          </Button>
+                        </div>
+                      </CardTitle>
+                      <CardDescription>
+                        Human-readable summary optimized for AI prompts
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <CodeEditor
+                        value={analysisResult.summary}
+                        readOnly
+                        height="300px"
+                        theme="vs-dark"
+                        language="markdown"
+                        placeholder="Schema summary will appear here"
+                      />
+                    </CardContent>
+                  </Card>
+                )}
               </div>
             </div>
           </TabsContent>
@@ -388,7 +526,22 @@ Error: Something went wrong
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Scissors className="h-5 w-5 text-blue-600" />
+                    <Microscope className="h-5 w-5 text-blue-600" />
+                    Schema Analysis
+                    <Badge variant="secondary" className="text-xs">New</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    Analyze data types, ranges, patterns, and create generalized schemas with possible values for fields with ≤20 unique values.
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Scissors className="h-5 w-5 text-green-600" />
                     Smart Compression
                   </CardTitle>
                 </CardHeader>
@@ -402,7 +555,7 @@ Error: Something went wrong
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Shield className="h-5 w-5 text-green-600" />
+                    <Shield className="h-5 w-5 text-purple-600" />
                     Privacy First
                   </CardTitle>
                 </CardHeader>
@@ -416,27 +569,13 @@ Error: Something went wrong
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-purple-600" />
-                    Syntax Highlighting
+                    <Sparkles className="h-5 w-5 text-indigo-600" />
+                    Type Detection
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Automatic language detection with beautiful syntax highlighting for better readability.
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Download className="h-5 w-5 text-indigo-600" />
-                    AI Models
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    Download and experiment with popular open-source AI models from Hugging Face.
+                    Automatically detects booleans, numbers with ranges, strings with patterns (email, URL, date), and more.
                   </p>
                 </CardContent>
               </Card>
@@ -445,12 +584,12 @@ Error: Something went wrong
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <BarChart3 className="h-5 w-5 text-orange-600" />
-                    Real-time Stats
+                    Value Analysis
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    See token count reduction in real-time with detailed compression statistics.
+                    Lists all possible values when ≤20 unique values exist, with frequency analysis and pattern recognition.
                   </p>
                 </CardContent>
               </Card>
@@ -459,12 +598,12 @@ Error: Something went wrong
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <FileText className="h-5 w-5 text-teal-600" />
-                    Multi-format Support
+                    Modern UI
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground">
-                    Supports JSON, logs, XML, YAML, and other common developer file formats.
+                    Improved interface with dialogs, collapsible sections, and better organization for complex data analysis.
                   </p>
                 </CardContent>
               </Card>
